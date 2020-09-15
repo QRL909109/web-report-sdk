@@ -196,6 +196,48 @@ Performance({
 })
 
 ```
+* 自动打点
+```js
+1、使用自动打点   
+window._clog = Performance({
+  domain:'http://report.com/api/v1/report/web',
+  add:{
+      appId:'D3D9B9AA45B56F6E424F57EFB36B0XXX',
+  }
+})
+```
+一、绑定class   
+  自动上报点击 class 增加 on-log  class="on-log"
+  加上附属参数 data-log-region="head-menu" data-log-pos="recommended" 
+  
+  ```html
+  <div 
+    class="btn on-log on-visible" 
+    data-log-region="head-menu" 
+    data-log-pos="recommended">
+    click
+  </div>
+  ```
+
+  自动上报曝光 class 增加 on-visible  class="on-visible"
+  加上附属参数 data-log-region="head-menu" data-log-pos="recommended"
+
+  ```html
+  <div 
+    class="btn on-log on-visible" 
+    data-log-region="head-menu" 
+    data-log-pos="recommended">
+    click
+  </div>
+  ```
+  
+二、手动上报打点
+  ```js
+  _clog.sendLog(logType: String, data: Object): // 手动发送自定义埋点上报; logType: click, visible, event, error
+  _clog.collectVisible(options: Object | String): // 马上收集曝光并上报(on-visible)
+  _clog.bindVisibleScroll(options: Object | String) // 绑定滚动窗口,用于收集曝光并上报, 例子: bindVisibleScroll('.xxxx')
+  ```
+  
 
 ### 对外方法：
 一：addError  ：此方法向插件中自定义上报错误信息，vue,react，try{}catch 的报错信息均可采用此方法上报

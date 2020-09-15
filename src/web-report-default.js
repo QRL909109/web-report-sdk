@@ -38,6 +38,106 @@ function randomString(len) {
     return pwd + new Date().getTime();
 }
 
+/**
+ * 获取可视窗口位置
+ * */
+function getWindowRect() {
+    return {
+        top: 0,
+        bottom: (document.documentElement || document.body).clientHeight,
+        left: 0,
+        right: (document.documentElement || document.body).clientWidth
+    };
+}
+
+/**
+ * 寻找元素内相关埋点的属性
+ * */
+function findLogParam(ele, loopNum = 12) {
+    if (!ele) {
+        return;
+    }
+    let loop = loopNum || 10;
+    let result;
+    let element = ele;
+
+    function loopFind(ele) {
+        let className = ele["className"] || "";
+        if (
+            className.indexOf("on-log") > -1 ||
+            className.indexOf("on-visible") > -1
+        ) {
+            result = {};
+            let attributes = ele["attributes"] || [];
+            for (let i = 0; i < attributes.length; i++) {
+                let tmp = attributes[i];
+                if (typeof tmp == "string") {
+                    let tmpSplit = tmp.split("=");
+                    tmp = {};
+                    tmp[tmpSplit[0]] = tmpSplit[1];
+                }
+                let name = tmp["name"] || "";
+                let value = tmp["value"] || "";
+                if (name && name.indexOf("data") > -1) {
+                    let key = name.replace(/data-(log-)?/, "");
+                    result[key] = value;
+                }
+            }
+        }
+    }
+    while (loop && element) {
+        loopFind(element);
+        loop--;
+        element = element["parentElement"] || null;
+        if (result) {
+            break;
+        }
+    }
+
+    return result;
+}
+
+/**
+* 节流
+* */
+function debounce(fn, delay) {
+    // 定时器，用来 setTimeout
+    var timer;
+
+    // 返回一个函数，这个函数会在一个时间区间结束后的 delay 毫秒时执行 fn 函数
+    return function () {
+        // 保存函数调用时的上下文和参数，传递给 fn
+        var context = this;
+        var args = arguments;
+
+        // 每次这个返回的函数被调用，就清除定时器，以保证不执行 fn
+        clearTimeout(timer);
+
+        // 当返回的函数被最后一次调用后（也就是用户停止了某个连续的操作），
+        // 再过 delay 毫秒就执行 fn
+        timer = setTimeout(function () {
+            fn.apply(context, args);
+        }, delay);
+    };
+}
+/**
+* 判断元素是否在容器内
+* */
+function judgeElementInViewport(el, wrapRect, minViewPx) {
+    if (typeof minViewPx === "undefined") minViewPx = 1; // 最小显示px值
+    let rect = el.getBoundingClientRect();
+    // console.log(wrapRect, rect)
+    if (
+        rect.bottom < wrapRect.top + minViewPx ||
+        rect.top > wrapRect.bottom - minViewPx ||
+        rect.right < wrapRect.left + minViewPx ||
+        rect.left > wrapRect.right - minViewPx
+    ) {
+        return false;
+    }
+    return true;
+}
+
 // web msgs report function
 function Performance(option, fn) {
     try {
@@ -102,6 +202,7 @@ function Performance(option, fn) {
         let loadTime = 0
         let ajaxTime = 0
         let fetchTime = 0
+        let stack = [];
 
         // error上报
         if (opt.isError) _error();
@@ -130,7 +231,7 @@ function Performance(option, fn) {
                                 } else {
                                     conf.ajaxMsg[responseURL]['decodedBodySize'] = xhr.xhr.responseText.length;
                                 }
-                            } catch (err) {}
+                            } catch (err) { }
                             getAjaxTime('readychange')
                         }
                         if (xhr.status < 200 || xhr.status > 300) {
@@ -163,7 +264,7 @@ function Performance(option, fn) {
                             } else {
                                 conf.ajaxMsg[responseURL]['decodedBodySize'] = xhr.xhr.responseText.length;
                             }
-                        } catch (err) {}    
+                        } catch (err) { }
                         getAjaxTime('load');
                     }
                     if (xhr.status < 200 || xhr.status > 300) {
@@ -240,7 +341,7 @@ function Performance(option, fn) {
         }
 
         // report date
-        // @type  1:页面级性能上报  2:页面ajax性能上报  3：页面内错误信息上报
+        // @type  1:页面级性能上报  2:页面ajax性能上报  3：页面内错误信息上报 4：用户手动上报
         function reportData(type = 1) {
             setTimeout(() => {
                 if (opt.isPage) perforPage();
@@ -286,6 +387,9 @@ function Performance(option, fn) {
                         errorList: conf.errorList,
                         resourceList: conf.resourceList,
                     })
+                } else if (type == 4) {
+                    // 4：用户手动上报
+                    result = Object.assign(result, params);
                 }
 
                 result = Object.assign(result, opt.add)
@@ -672,5 +776,176 @@ function Performance(option, fn) {
             ajaxTime = 0
             fetchTime = 0
         }
+
+
+        initLogReport()
+
+        /**
+        * 埋点志收集事件注册
+        * */
+        function initLogReport() {
+            if (typeof window == "undefined") {
+                return;
+            }
+            // 点击委托
+            window.document.addEventListener(
+                "click",
+                (e) => {
+                    let logParam = findLogParam(e.target);
+                    if (logParam) {
+                        sendLog("click", logParam);
+                    }
+                },
+                true
+            );
+
+            // 滚动委托
+            window.addEventListener(
+                "scroll",
+                debounce((e) => {
+                    collectVisible();
+                }, 250)
+            );
+        }
+
+        /**
+         * 收集窗口内曝光点
+         * @param {object} options - 绑定对象
+         */
+        function collectVisible(options = {}) {
+            options = Object.assign({}, options);
+
+            let wrap;
+            if (!options.wrap) {
+                wrap = document;
+            } else if (typeof options.wrap === "string") {
+                wrap = document.getElementsByClassName(options.wrap)[0];
+            } else if (options.wrap && options.wrap.nodeType === 1) {
+                wrap = options.wrap;
+            }
+            if (!wrap) {
+                return;
+            }
+            if (!document.body.getBoundingClientRect) {
+                return;
+            }
+            let className = options.className || "on-visible";
+
+            let items = Array.prototype.slice.call(
+                wrap.getElementsByClassName(className)
+            ),
+                len = items.length,
+                result = [];
+
+            let viewRect;
+
+            let i, item;
+            for (i = 0; i < len; i++) {
+                item = items[i];
+                if (item.getAttribute("isVisible")) {
+                    continue;
+                }
+                // 获取视觉边界，屏幕边界与容器边界交集
+                if (!viewRect) {
+                    viewRect = getWindowRect();
+                    if (wrap !== document) {
+                        var wrapRect = wrap.getBoundingClientRect();
+                        viewRect.top = Math.max(viewRect.top, wrapRect.top);
+                        viewRect.bottom = Math.min(viewRect.bottom, wrapRect.bottom);
+                        viewRect.left = Math.max(viewRect.left, wrapRect.left);
+                        viewRect.right = Math.min(viewRect.right, wrapRect.right);
+                    }
+                    if (
+                        viewRect.top >= viewRect.bottom ||
+                        viewRect.left >= viewRect.right
+                    )
+                        return;
+                }
+
+                if (judgeElementInViewport(item, viewRect)) {
+                    result.push(item);
+                }
+            }
+            result.length &&
+                typeof options.callback === "function" &&
+                options.callback(result);
+            for (let ele of result) {
+                ele.setAttribute("isVisible", "1");
+            }
+
+            let logs = [];
+            for (let ele of result) {
+                let param = findLogParam(ele, 1);
+                if (param && Object.keys(param)) {
+                    logs.push(param);
+                }
+            }
+            if (logs.length) {
+                sendLog("visible", {
+                    logs: JSON.stringify(logs),
+                });
+            }
+
+            return result;
+        }
+
+        /**
+       * 绑定窗口滚动
+       * @param {object} options - 绑定对象
+       * */
+        function bindVisibleScroll(options) {
+            if (!options) return;
+
+            let wrap;
+            if (typeof options === "string") {
+                wrap = document.getElementsByClassName(options)[0];
+            } else if (typeof options.wrap === "string") {
+                wrap = document.getElementsByClassName(options.wrap)[0];
+            } else if (options.wrap && options.wrap.nodeType === 1) {
+                wrap = options.wrap;
+            }
+            if (!wrap) return;
+
+            collectVisible({
+                wrap: wrap,
+                className: options.className,
+                callback: options.callback
+            });
+
+            wrap.addEventListener(
+                "scroll",
+                debounce(e => {
+                    collectVisible({
+                        wrap: e.target,
+                        className: options.className,
+                        callback: options.callback
+                    });
+                }, 250)
+            );
+        }
+
+        // 发送打点数据
+        function sendLog(logType, data) {
+            if (logType) {
+                send(logType, data);
+            }
+        }
+        /**
+         * 发送请求
+         * */
+        function send(logType = "", data) {
+            stack.push({
+                logType,
+                data,
+            });
+            if (stack.length <= 1) {
+                reportData(4, stack.shift());
+            }
+        }
+        return {
+            sendLog,
+            bindVisibleScroll,
+            collectVisible
+        };
     } catch (err) { }
 }
